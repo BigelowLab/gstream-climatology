@@ -1,0 +1,69 @@
+Eastern Point
+================
+
+Load the data and select the northwall. Then group by month and find the
+mean position of the eastern-most N point.
+
+``` r
+x = read_usn() |>
+  dplyr::filter(wall == "north") |>
+  dplyr::mutate(mdate = format(date, "%Y-%m-01"))
+```
+
+``` r
+N = 1
+mon = x |>
+  dplyr::group_by(mdate) |>
+  dplyr::group_map(
+    function(tbl, key){
+      z = sf::st_cast(tbl, "POINT")
+      xy = sf::st_coordinates(z) |>
+                             dplyr::as_tibble()
+      y = dplyr::bind_cols(z, xy) |>
+        dplyr::arrange(dplyr::desc(.data$X), dplyr::desc(.data$Y)) |>
+        dplyr::slice_head(n = N)
+      
+      sf::st_combine(y) |>
+        sf::st_centroid() |>
+        sf::st_as_sf() |>
+        sf::st_set_geometry("geometry") |>
+        dplyr::mutate(date = key$mdate, .before = 1)
+    } ) |>
+  dplyr::bind_rows() |>
+  dplyr::mutate(date = as.Date(.data$date), month = format(date, "%b"))
+```
+
+Make monthly climatologies.
+
+``` r
+mclim = dplyr::filter(mon, date < as.Date("2023-12-31")) |>
+  dplyr::group_by(month) |>
+  dplyr::group_map(
+    function(tbl, key){
+      x = sf::st_combine(tbl) |>
+        sf::st_centroid() |>
+        sf::st_as_sf() |>
+        dplyr::mutate(date = tbl$date[1], .before = 1) |>
+        dplyr::mutate(month = tbl$month[1], .after = 1) |>
+        sf::st_set_geometry("geometry")
+    }, .keep = TRUE ) |> 
+  dplyr::bind_rows() |>
+  dplyr::arrange(date)
+```
+
+Plot Jan, Feb and March. It looks like they went through a period where
+the truncated the data at 65W. Oops.
+
+``` r
+jfm_mon = dplyr::filter(mon, date < as.Date("2023-12-31"), 
+                         month %in% c("Jan", "Feb", "Mar"))
+jfm_clim = dplyr::filter(mclim, month %in% c("Jan", "Feb", "Mar"))
+jfm_recent = dplyr::filter(mon, date > as.Date("2023-12-31"), 
+                         month %in% c("Jan", "Feb", "Mar"))
+plot(jfm_mon['month'], axes = TRUE, reset = FALSE)
+plot(jfm_clim['month'], add = TRUE, cex = 2)
+plot(jfm_recent['month'], add = TRUE, pch = 16)
+add_coast()
+```
+
+![](Eastern-point_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
